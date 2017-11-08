@@ -21,7 +21,7 @@ public:
 private:
     Ui::MainWindow *ui;
 
-    QSqlQueryModel* model;
+    QSqlTableModel* model;
     CachedSqlTableModel testModel;
 };
 

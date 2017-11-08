@@ -18,13 +18,16 @@ MainWindow::MainWindow(QWidget *parent) :
 
 
     auto db = QSqlDatabase::addDatabase("QSQLITE");
-    db.setDatabaseName("/home/king/Projects/DBPlayground/history.db");
+    db.setDatabaseName("/home/king/Projects/CachedSqlTable/history.db");
     if (!db.open())
     {
         qDebug() << "failed opening db";
-    } else {
+    }
+    else
+    {
         testModel.setTableName("historyTable");
         testModel.setDatabase(db);
+        testModel.setFilter("value=12435");
         testModel.select();
         qDebug() << testModel.rowCount();
         auto r = testModel.record();
@@ -39,7 +42,6 @@ MainWindow::MainWindow(QWidget *parent) :
 
         });
         testModel.insertRecord(r);
-        qDebug() << testModel.rowCount();
         ui->tableView->setModel(&testModel);
     }
 }

@@ -5,6 +5,8 @@
 #include <QRegExp>
 #include <QtConcurrent>
 #include <QFutureWatcher>
+#include <QSqlDriver>
+#include <QSqlField>
 #include <memory>
 
 
@@ -57,24 +59,18 @@ void CachedSqlTableModel::insertRecord(const QSqlRecord &record)
 
 void CachedSqlTableModel::submitAll()
 {
-    auto inserterFuture = QtConcurrent::run(this, &CachedSqlTableModel::insertPendingRows);
-    std::shared_ptr<QFutureWatcher<bool>> inserterWatcher(new QFutureWatcher<bool>());
-    connect(inserterWatcher.get(), &QFutureWatcher<bool>::finished, this, [this, inserterFuture](){
-        if (inserterFuture.result())
-        {
-            emit rowsInserted(commitBeginRow, static_cast<int>(m_cache.size() - 1));
-        }
-        else
-        {
-            emit insertionFailed();
-        }
-    });
+    QtConcurrent::run(this, &CachedSqlTableModel::insertPendingRows);
 }
 
 void CachedSqlTableModel::select()
 {
     QSqlQuery selectQuery(m_db);
-    QString insertQueryString = QString("SELECT * FROM %1").arg(tableName);
+    auto sqlDriver = m_db.driver();
+    QString insertQueryString = QString("SELECT * FROM %1 %2").arg(
+                sqlDriver->escapeIdentifier(tableName, QSqlDriver::TableName),
+                m_filter);
+    insertQueryString.trimmed();
+
     if (!selectQuery.prepare(insertQueryString))
     {
         m_lastError = selectQuery.lastError();
@@ -89,12 +85,13 @@ void CachedSqlTableModel::select()
 
     m_templateRecord = selectQuery.record();
     m_columnCount = m_templateRecord.count();
-
+    beginResetModel();
+    m_cache.clear();
     while (selectQuery.next())
     {
         m_cache.push_back(selectQuery.record());
     }
-
+    endResetModel();
 }
 
 QVariant CachedSqlTableModel::data(const QModelIndex &index, int role) const
@@ -117,31 +114,57 @@ int CachedSqlTableModel::columnCount(const QModelIndex &) const
     return m_columnCount;
 }
 
-bool CachedSqlTableModel::insertPendingRows()
+void CachedSqlTableModel::generateInsertValues(QString &insertQueryString)
 {
-    QSqlQuery insertQuery(m_db);
-    QString insertQueryString = QString("INSERT INTO '%1' VALUES").arg(tableName);
-
+    auto sqlDriver = m_db.driver();
     for (size_t i = static_cast<size_t>(commitBeginRow); i < m_cache.size(); ++i)
     {
         auto &record = m_cache[i];
-        insertQueryString.append("(");
-//        for (int i = 0; i < columnCount(); ++i)
-//        {
-//            insertQueryString.append(record.value(i));
-//        }
+        insertQueryString.append('(');
+        for (int i = 0; i < columnCount() - 1; ++i)
+        {
+            insertQueryString.append(sqlDriver->formatValue(record.field(i)));
+            insertQueryString.append(',');
+        }
+        insertQueryString.append(record.value(columnCount() - 1).toString());
+        insertQueryString.append("),");
     }
+    insertQueryString.truncate(insertQueryString.length() - 1);
+}
+
+QString CachedSqlTableModel::getFilter() const
+{
+    return m_filter;
+}
+
+void CachedSqlTableModel::setFilter(const QString &filter)
+{
+    m_filter = QString("WHERE %1").arg(filter);
+}
+
+bool CachedSqlTableModel::insertPendingRows()
+{
+    QSqlQuery insertQuery(m_db);
+    auto sqlDriver = m_db.driver();
+    QString insertQueryString = QString("INSERT INTO %1 VALUES").arg(
+                sqlDriver->escapeIdentifier(tableName, QSqlDriver::TableName));
+
+    generateInsertValues(insertQueryString);
 
     if (!insertQuery.prepare(insertQueryString))
     {
         m_lastError = insertQuery.lastError();
-        qDebug() << m_lastError;
     }
-    bool execResult = insertQuery.execBatch();
+    bool execResult = insertQuery.exec();
+
     if (!execResult)
     {
         m_lastError = insertQuery.lastError();
-        qDebug() << m_lastError << insertQuery.executedQuery();
+        emit insertionFailed();
+    }
+    else
+    {
+        emit rowsInserted(commitBeginRow, static_cast<int>(m_cache.size() - 1));
     }
     return execResult;
 }

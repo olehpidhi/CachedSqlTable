@@ -5,6 +5,7 @@
 #include <QSqlTableModel>
 #include <QSqlRecord>
 #include <QSqlError>
+#include <QFuture>
 
 class CachedSqlTableModel : public QAbstractTableModel
 {
@@ -30,6 +31,9 @@ public:
 
     QSqlRecord record() const;
 
+    QString getFilter() const;
+    void setFilter(const QString &filter);
+
 public slots:
     void submitAll();
     void select();
@@ -40,11 +44,13 @@ signals:
 
 private:
     bool insertPendingRows();
+    void generateInsertValues(QString &insertQueryString);
 
 private:
     std::vector<QSqlRecord> m_cache;
     QSqlDatabase m_db;
     QString tableName;
+    QString m_filter;
     int commitBeginRow = -1;
     QSqlTableModel::EditStrategy editStrategy = QSqlTableModel::OnRowChange;
     int m_columnCount = 0;
